@@ -9,6 +9,10 @@ Three-phase meter reading - 4 - obtain reactive power energy 1 - Issue command
 FE FE FE FE 68 35 29 00 26 20 01 68 11 04 34 63 93 37 EB 16
 Three-phase meter reading - 5 - obtain reactive power energy 2 - Issue command
 FE FE FE FE 68 35 29 00 26 20 01 68 11 04 35 63 93 37 EC 16
+Cut off
+FEFEFEFE6835290026200168140D2122333A3533333363636363CC6C16
+Cut On
+FEFEFEFE6835290026200168140D2122333A3533333363636363882816
 */
 
 #define RS485_SPEED 2400                // Velocidad de comunicación para RS485
@@ -22,9 +26,13 @@ HardwareSerial RS485(1);
 
 byte txBuffer[120];
 int txLength = 0;
+bool hexConEspacios = false;
 
 byte buffer[120];
 int frameLength = 0;
+
+bool parsearHex(char *cadena, int len);
+int hexVal(char c);
 
 void setup() {
 
@@ -56,51 +64,75 @@ void loop() {
 
 bool leerCadenaHex() {
 
-  if (!Serial.available())
-    return false;
+  static char cadena[400];
+  static int idx = 0;
+  static unsigned long ultimoLectura = 0;
 
-  char cadena[400];
-  int idx = 0;
-  unsigned long ultimo = millis();
+  const unsigned long TIMEOUT_MS = 300;
 
-  while (millis() - ultimo < 100) {
+  while (Serial.available()) {
 
-    if (Serial.available()) {
+    char c = Serial.read();
+    ultimoLectura = millis();
 
-      char c = Serial.read();
-      ultimo = millis();
+    if (c == '\n' || c == '\r') {
 
-      if (c == '\n' || c == '\r') {
-
-        if (idx > 0)
-          break;
-
+      if (idx == 0)
         continue;
-      }
 
-      if (idx < (int)sizeof(cadena) - 1)
-        cadena[idx++] = c;
+      cadena[idx] = '\0';
+      int len = idx;
+      idx = 0;
+      return parsearHex(cadena, len);
+    }
+
+    if (idx < (int)sizeof(cadena) - 1)
+      cadena[idx++] = c;
+  }
+
+  if (idx > 0 && ultimoLectura > 0 && millis() - ultimoLectura >= TIMEOUT_MS) {
+
+    cadena[idx] = '\0';
+    int len = idx;
+    idx = 0;
+    ultimoLectura = 0;
+    return parsearHex(cadena, len);
+  }
+
+  return false;
+}
+
+bool parsearHex(char *cadena, int len) {
+
+  hexConEspacios = false;
+
+  for (int i = 0; i < len; i++) {
+    if (cadena[i] == ' ' || cadena[i] == '\t') {
+      hexConEspacios = true;
+      break;
     }
   }
 
-  cadena[idx] = '\0';
-
-  if (idx == 0)
-    return false;
-
   txLength = 0;
 
-  char *token = strtok(cadena, " ");
+  for (int i = 0; i < len && txLength < (int)sizeof(txBuffer); ) {
 
-  while (token != NULL && txLength < (int)sizeof(txBuffer)) {
+    while (i < len && (cadena[i] == ' ' || cadena[i] == '\t'))
+      i++;
 
-    int alto = hexVal(token[0]);
-    int bajo = hexVal(token[1]);
+    if (i + 1 >= len)
+      break;
 
-    if (alto >= 0 && bajo >= 0)
-      txBuffer[txLength++] = (alto << 4) | bajo;
+    int alto = hexVal(cadena[i]);
+    int bajo = hexVal(cadena[i + 1]);
 
-    token = strtok(NULL, " ");
+    if (alto < 0 || bajo < 0) {
+      i++;
+      continue;
+    }
+
+    txBuffer[txLength++] = (alto << 4) | bajo;
+    i += 2;
   }
 
   return txLength > 0;
@@ -171,7 +203,7 @@ void imprimirTrama(byte *frame, int len) {
 
     imprimirByteHex(frame[i]);
 
-    if (i < len - 1)
+    if (hexConEspacios && i < len - 1)
       Serial.print(" ");
   }
 
