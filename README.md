@@ -6,7 +6,7 @@ Pasarela para **ESP32 Heltec WiFi LoRa 32 V2** que recibe tramas en formato hexa
 
 El firmware actúa como un puente entre la PC y un medidor eléctrico que habla el protocolo **DLT645** por RS485:
 
-1. Espera a que el usuario escriba una cadena hexadecimal en el monitor serie.
+1. Espera a que el usuario escriba una cadena hexadecimal en el monitor serie (con o sin espacios entre bytes).
 2. Convierte esa cadena en bytes y la envía por RS485.
 3. Muestra un eco de confirmación (`TX:`).
 4. Espera la respuesta del medidor (hasta 2 segundos).
@@ -107,11 +107,12 @@ Esta separación permite usar el Monitor Serie del IDE (8N1) sin interferir con 
 
 | Función | Descripción |
 |---|---|
-| `leerCadenaHex()` | Lee una línea hexadecimal desde `Serial`, la separa por espacios y convierte cada par de caracteres en un byte. Detecta fin de línea por `\n`/`\r` o por 100 ms de inactividad. |
+| `leerCadenaHex()` | Acumula caracteres desde `Serial` entre iteraciones de `loop()`. Detecta fin de línea por `\n`/`\r` o por 300 ms de inactividad, y delega el parseo a `parsearHex()`. |
+| `parsearHex()` | Convierte la cadena hexadecimal en bytes. Acepta ambos formatos (con o sin espacios) y detecta automáticamente cuál se usó para responder en el mismo estilo. |
 | `hexVal()` | Convierte un carácter hexadecimal (`0-9`, `A-F`, `a-f`) a su valor numérico (0–15). |
 | `enviarTrama()` | Activa el pin de control RS485, envía los bytes por `RS485`, desactiva el pin y muestra el eco `TX:` por `Serial`. |
 | `recibirTrama()` | Escucha por `RS485` hasta 2 segundos. Captura desde el primer byte `0xFE` (preámbulo) o `0x68` hasta el byte final `0x16`. |
-| `imprimirTrama()` | Imprime una trama en formato `XX XX XX ...` con bytes en mayúsculas separados por espacios. |
+| `imprimirTrama()` | Imprime una trama en hexadecimal mayúscula. Usa espacios entre bytes solo si la entrada los tenía. |
 
 ### Captura de la respuesta
 
@@ -144,19 +145,37 @@ Esperando trama (hex)...
 
 ### 3. Enviar una trama
 
-Escribí una cadena hexadecimal con bytes separados por espacios y presioná Enter (o esperá 100 ms sin escribir):
+Escribí una cadena hexadecimal y presioná Enter (o esperá 300 ms sin escribir). Ambos formatos son válidos:
+
+**Con espacios:**
 
 ```
 FE FE FE FE 68 35 29 00 26 20 01 68 11 04 34 45 93 37 CD 16
 ```
 
+**Sin espacios:**
+
+```
+FEFEFEFE6835290026200168110434459337CD16
+```
+
+El firmware detecta automáticamente el formato de entrada y responde en el mismo estilo: si enviás con espacios, `TX:` y `RX:` se muestran con espacios; si enviás sin espacios, la salida también va sin espacios.
+
 ### 4. Leer la respuesta
 
-El firmware mostrará el eco de lo enviado y la respuesta del medidor:
+El firmware mostrará el eco de lo enviado y la respuesta del medidor. Ejemplo con entrada con espacios:
 
 ```
 TX: FE FE FE FE 68 35 29 00 26 20 01 68 11 04 34 45 93 37 CD 16
 RX: FE FE FE FE 68 35 29 00 26 20 01 68 91 13 34 45 93 37 7C 55 33 33 33 33 33 33 33 33 33 33 33 33 33 C4 16
+Esperando trama (hex)...
+```
+
+Ejemplo con entrada sin espacios:
+
+```
+TX: FEFEFEFE6835290026200168110434459337CD16
+RX: FEFEFEFE68352900262001689113344593337C553333333333333333333333C416
 Esperando trama (hex)...
 ```
 
@@ -176,10 +195,16 @@ Simplemente escribí una nueva cadena hexadecimal. No hace falta reiniciar el ES
 
 ### Lectura de energía activa total (DI: 00 01 00 00)
 
-Solicitud:
+Solicitud (con espacios):
 
 ```
 FE FE FE FE 68 35 29 00 26 20 01 68 11 04 33 34 33 37 CD 16
+```
+
+Equivalente sin espacios:
+
+```
+FEFEFEFE6835290026200168110433343337CD16
 ```
 
 ### Lectura con dirección de medidor específica
@@ -192,6 +217,12 @@ Ejemplo con dirección `012026002935`:
 FE FE FE FE 68 35 29 00 26 20 01 68 11 04 34 45 93 37 CD 16
 ```
 
+o:
+
+```
+FEFEFEFE6835290026200168110434459337CD16
+```
+
 > Los bytes `35 29 00 26 20 01` corresponden a la dirección `012026002935` en formato DLT645 (orden inverso).
 
 ## Solución de problemas
@@ -202,7 +233,8 @@ FE FE FE FE 68 35 29 00 26 20 01 68 11 04 34 45 93 37 CD 16
 | Aparece `TX:` pero no `RX:` | Medidor no responde o cableado incorrecto | Revisá conexiones A/B, alimentación del medidor y dirección en la trama |
 | Aparece `Timeout` | Velocidad o paridad incorrecta en RS485 | Confirmá que el medidor use **2400 8E1** |
 | Respuesta corrupta o incompleta | Bus RS485 sin terminación o cable largo | Agregá resistencia de terminación de 120 Ω entre A y B en los extremos del bus |
-| `TX:` con bytes incorrectos | Formato de entrada inválido | Usá pares hex de 2 dígitos separados por espacios (`FE`, no `F` ni `0xFE`) |
+| `TX:` con bytes incorrectos o incompletos | Formato de entrada inválido | Usá pares hex de 2 dígitos (`FE`, no `F` ni `0xFE`). Con o sin espacios entre bytes. |
+| `TX:` muestra solo el primer byte | Cadena recibida incompleta | Pegá la trama completa y presioná Enter, o esperá 300 ms tras el último carácter |
 | Sin comunicación tras conectar | Terminales A/B invertidos | Intercambiá los cables A y B del bus RS485 |
 
 ## Estructura del proyecto
